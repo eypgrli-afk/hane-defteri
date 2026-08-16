@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hâne Defteri</title>
+
+<!-- ================================================================
+     FIREBASE AYARLARI — kendi Firebase projenizin bilgilerini
+     aşağıdaki firebaseConfig içine yapıştırın (kurulum talimatları
+     Claude'un size verdiği mesajda).
+     ================================================================ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: #F2EDE0;
+    background-image: repeating-linear-gradient(to bottom, rgba(139,122,74,0.06) 0px, rgba(139,122,74,0.06) 1px, transparent 1px, transparent 28px);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #23342E;
+  }
+  .container { max-width: 480px; margin: 0 auto; padding: 16px 12px 60px; }
+  h1 { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.3px; }
+  .subtitle { margin: 2px 0 0; font-size: 13px; color: #7A6A55; opacity: .8; }
+  .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .icon-btn {
+    background: #FBF8F1; border: 1px solid #E4DCC6; border-radius: 10px; padding: 8px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .ay-nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 12px; }
+  .ay-nav button { background: none; border: none; cursor: pointer; color: #8E7A4A; display: flex; padding: 4px; }
+  .ay-label { font-weight: 700; font-size: 16px; min-width: 120px; text-align: center; }
+
+  .card {
+    background: #FBF8F1; border: 1px solid #E4DCC6; border-radius: 16px; padding: 14px; margin-top: 14px;
+  }
+  .terazi-card { text-align: center; }
+  .terazi-alt { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; font-size: 13px; }
+  .denge-yazi { font-size: 12px; color: #7A6A55; font-style: italic; }
+
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .summary-card { background: #FBF8F1; border: 1px solid #E4DCC6; border-radius: 14px; padding: 10px; }
+  .summary-label { font-size: 11px; color: #7A6A55; margin: 0; }
+  .summary-value { font-family: monospace; font-size: 14px; font-weight: 700; margin: 2px 0 0; }
+
+  .add-row { display: flex; gap: 8px; margin-top: 14px; }
+  .add-btn {
+    flex: 1; color: #fff; border: none; border-radius: 12px; padding: 11px 6px; font-weight: 700; font-size: 12.5px;
+    display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer;
+  }
+
+  .card-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .card-title { font-size: 16px; font-weight: 700; margin: 0; }
+  .toggle-pill { display: flex; background: #EFE7D4; border-radius: 10px; padding: 3px; gap: 2px; }
+  .pill-btn {
+    border: none; background: none; padding: 6px 12px; border-radius: 8px; font-size: 12px;
+    font-weight: 600; color: #7A6A55; cursor: pointer; flex: 1;
+  }
+  .pill-btn.active { color: #fff; }
+
+  .bos-metin { font-size: 13px; color: #8A7F6A; margin: 0; line-height: 1.5; }
+  .legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .legend-ad { font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend-yuzde { font-size: 12px; font-family: monospace; color: #7A6A55; }
+
+  .bar-label-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .bar-track { height: 8px; background: #EFE7D4; border-radius: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
+
+  select.select-mini {
+    border: 1px solid #E4DCC6; background: #F6F1E7; border-radius: 8px; font-size: 12px; padding: 5px 8px;
+  }
+  .islem-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #EFE7D4; }
+  .islem-kategori { font-size: 13.5px; font-weight: 600; margin: 0; }
+  .islem-alt { font-size: 11.5px; color: #8A7F6A; margin: 2px 0 0; }
+  .islem-tutar { font-family: monospace; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .sil-btn { border: none; background: none; color: #B4A98F; cursor: pointer; display: flex; padding: 4px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(35,52,46,0.45); display: flex;
+    align-items: flex-end; justify-content: center; z-index: 50;
+  }
+  .modal-card {
+    background: #FBF8F1; border-radius: 20px 20px 0 0; padding: 18px 18px 26px;
+    width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto;
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .modal-title { font-size: 18px; font-weight: 800; margin: 0; }
+  .form-label { font-size: 12px; color: #7A6A55; font-weight: 600; display: block; margin: 12px 0 5px; }
+  .input {
+    width: 100%; border: 1px solid #E4DCC6; background: #F6F1E7; border-radius: 10px;
+    padding: 10px 12px; font-size: 14px; box-sizing: border-box; font-family: inherit;
+  }
+  .kaydet-btn {
+    width: 100%; margin-top: 18px; background: #23342E; color: #fff; border: none;
+    border-radius: 12px; padding: 13px 0; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .uyari { background: #F6E4DC; color: #8B3A3A; font-size: 12px; border-radius: 10px; padding: 8px 10px; margin-top: 10px; }
+
+  /* giriş ekranı (hane kodu) */
+  .giris-sarmalayici { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .giris-kart { background: #FBF8F1; border: 1px solid #E4DCC6; border-radius: 18px; padding: 28px 22px; max-width: 380px; width: 100%; text-align: center; }
+  .giris-kart h1 { font-size: 24px; margin-bottom: 6px; }
+  .giris-kart p { font-size: 13px; color: #7A6A55; margin: 4px 0 18px; line-height: 1.5; }
+
+  #yukleniyor-ekrani { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #6b6455; }
+</style>
+</head>
+<body>
+
+<div id="yukleniyor-ekrani">Defter açılıyor…</div>
+
+<div id="giris-ekrani" class="giris-sarmalayici" style="display:none;">
+  <div class="giris-kart">
+    <h1>🏠 Hâne Defteri</h1>
+    <p>İkinizin de aynı defteri görmesi için ortak bir "hâne kodu" belirleyin. Bu kodu bilen herkes veriye erişebilir, o yüzden tahmin edilmesi zor bir kod seçin (örn. bir aile lakabı + rakam). Kodu bir kere girin, tarayıcınız hatırlayacak.</p>
+    <input id="hane-kodu-input" class="input" type="text" placeholder="örn. yilmazev2026" style="margin-bottom:12px;" />
+    <button class="kaydet-btn" onclick="haneKoduKaydet()">Devam et</button>
+  </div>
+</div>
+
+<div id="uygulama" class="container" style="display:none;">
+  <!-- JS ile doldurulacak -->
+</div>
+
+<script>
+/* =========================================================
+   FIREBASE YAPILANDIRMASI
+   Kendi Firebase projenizin bilgilerini buraya yapıştırın.
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyA-SAjvNs8SJdsvnCKeOh4nM3koFFlgxmI",
+  authDomain: "hane-gelir-gider-d75f7.firebaseapp.com",
+  databaseURL: "https://hane-gelir-gider-d75f7-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "hane-gelir-gider-d75f7",
+  storageBucket: "hane-gelir-gider-d75f7.firebasestorage.app",
+  messagingSenderId: "858232416026",
+  appId: "1:858232416026:web:f97f7f146716ab38f92ea3"
+};
+
+/* ========================================================= */
+
+const GIDER_KATEGORI = ["Kira / Ev Kredisi","Faturalar","Market","Ulaşım","Sağlık","Eğitim","Giyim","Eğlence","Kişisel Bakım","Borç / Taksit","Diğer"];
+const GELIR_KATEGORI = ["Maaş","Ek İş","Kira Geliri","Diğer"];
+const YATIRIM_KATEGORI = ["Birikim Hesabı","Altın","Döviz","Borsa / Fon","Kripto","Diğer"];
+const KATEGORI_RENK = ["#4F6F52","#A85C3B","#C79A3D","#5A7D8C","#8E5B6B","#6B7A3F","#B4763F","#3F6B66","#9A6B3F","#5F5A7D","#7A6A55"];
+const YATIRIM_RENGI = "#5A7D8C";
+const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+
+const TL = (n) => new Intl.NumberFormat("tr-TR", { style:"currency", currency:"TRY", maximumFractionDigits:0 }).format(n || 0);
+
+let db = null;
+let haneKodu = null;
+let islemler = {};      // { pushId: {tur,kategori,kisi,tutar,tarih,not} }
+let kisiler = { a: "Ben", b: "Eşim" };
+let ayIndex = new Date().getMonth();
+let yil = new Date().getFullYear();
+let kisiFiltre = "hepsi";
+let dagilimTur = "gider";
+let mevcutTur = "gider";
+
+/* ---------- başlangıç ---------- */
+window.addEventListener("DOMContentLoaded", () => {
+  const kayitliKod = localStorage.getItem("hane-defteri-kodu");
+  if (kayitliKod) {
+    baslat(kayitliKod);
+  } else {
+    document.getElementById("yukleniyor-ekrani").style.display = "none";
+    document.getElementById("giris-ekrani").style.display = "flex";
+  }
+});
+
+function haneKoduKaydet() {
+  const deger = document.getElementById("hane-kodu-input").value.trim();
+  if (!deger) return;
+  const guvenliKod = deger.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!guvenliKod) { alert("Lütfen harf/rakam içeren bir kod girin."); return; }
+  localStorage.setItem("hane-defteri-kodu", guvenliKod);
+  baslat(guvenliKod);
+}
+
+function baslat(kod) {
+  haneKodu = kod;
+  document.getElementById("giris-ekrani").style.display = "none";
+  document.getElementById("yukleniyor-ekrani").style.display = "flex";
+
+  try {
+    if (firebaseConfig.apiKey === "BURAYA_YAPISTIR") {
+      throw new Error("Firebase yapılandırması eksik. index.html dosyasının üstündeki firebaseConfig alanını kendi Firebase bilgilerinizle doldurun.");
+    }
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+  } catch (e) {
+    document.getElementById("yukleniyor-ekrani").innerHTML =
+      '<div style="max-width:380px;text-align:center;padding:20px;color:#8B3A3A;font-size:14px;">' + e.message + '</div>';
+    return;
+  }
+
+  const kok = db.ref("haneler/" + haneKodu);
+
+  kok.child("ayarlar").on("value", (snap) => {
+    const v = snap.val();
+    kisiler = v || { a: "Ben", b: "Eşim" };
+    render();
+  });
+
+  kok.child("islemler").on("value", (snap) => {
+    islemler = snap.val() || {};
+    document.getElementById("yukleniyor-ekrani").style.display = "none";
+    document.getElementById("uygulama").style.display = "block";
+    render();
+  }, (err) => {
+    document.getElementById("yukleniyor-ekrani").innerHTML =
+      '<div style="max-width:380px;text-align:center;padding:20px;color:#8B3A3A;font-size:14px;">Bağlantı hatası: ' + err.message + '</div>';
+  });
+}
+
+/* ---------- veri yardımcıları ---------- */
+function islemListesi() {
+  return Object.entries(islemler).map(([id, v]) => ({ id, ...v }));
+}
+function buAyIslemleri() {
+  return islemListesi().filter((i) => {
+    const d = new Date(i.tarih);
+    return d.getMonth() === ayIndex && d.getFullYear() === yil;
+  });
+}
+function toplam(tur, liste) { return liste.filter((i) => i.tur === tur).reduce((s, i) => s + Number(i.tutar), 0); }
+
+function islemEkle(veri) {
+  db.ref("haneler/" + haneKodu + "/islemler").push(veri);
+}
+function islemSil(id) {
+  db.ref("haneler/" + haneKodu + "/islemler/" + id).remove();
+}
+function kisilerKaydet(yeni) {
+  db.ref("haneler/" + haneKodu + "/ayarlar").set(yeni);
+}
+
+function ayDegistir(delta) {
+  ayIndex += delta;
+  if (ayIndex < 0) { ayIndex = 11; yil -= 1; }
+  if (ayIndex > 11) { ayIndex = 0; yil += 1; }
+  render();
+}
+
+/* ---------- SVG yardımcıları ---------- */
+function donutSvg(dilimler, boyut) {
+  const toplamDeger = dilimler.reduce((s, d) => s + d.deger, 0);
+  const cx = boyut / 2, cy = boyut / 2;
+  const rOuter = boyut * 0.46, rInner = boyut * 0.29;
+  const polar = (r, aci) => {
+    const rad = (aci - 90) * Math.PI / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+  const yol = (a1, a2) => {
+    const buyuk = a2 - a1 > 180 ? 1 : 0;
+    const p1 = polar(rOuter, a2), p2 = polar(rOuter, a1), p3 = polar(rInner, a1), p4 = polar(rInner, a2);
+    return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${buyuk} 0 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${rInner} ${rInner} 0 ${buyuk} 1 ${p4.x} ${p4.y} Z`;
+  };
+  let cumulative = 0;
+  const gap = dilimler.length > 1 ? 2.2 : 0;
+  let paths = "";
+  if (toplamDeger === 0) {
+    paths = `<circle cx="${cx}" cy="${cy}" r="${(rOuter+rInner)/2}" fill="none" stroke="#EFE7D4" stroke-width="${rOuter-rInner}" />`;
+  } else {
+    dilimler.forEach((d) => {
+      const aci = (d.deger / toplamDeger) * 360;
+      const b1 = cumulative + gap/2, b2 = cumulative + aci - gap/2;
+      cumulative += aci;
+      if (b2 > b1) paths += `<path d="${yol(b1,b2)}" fill="${d.renk}" />`;
+    });
+  }
+  return `<svg width="${boyut}" height="${boyut}" viewBox="0 0 ${boyut} ${boyut}">${paths}</svg>`;
+}
+
+const IKON = {
+  ayarlar: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b6455" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>`,
+  sol: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`,
+  sag: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>`,
+  arti: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  kapat: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`,
+  sil: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`
+};
+
+/* ---------- ana render ---------- */
+function render() {
+  const buAy = buAyIslemleri();
+  const toplamGelir = toplam("gelir", buAy);
+  const toplamGider = toplam("gider", buAy);
+  const toplamYatirim = toplam("yatirim", buAy);
+  const bakiye = toplamGelir - toplamGider - toplamYatirim;
+
+  const toplamGiderTum = toplamGider + toplamYatirim === 0 && toplamGelir === 0;
+
+  // terazi açısı
+  const t = toplamGelir + toplamGider;
+  const oran = t === 0 ? 0 : (toplamGelir - toplamGider) / t;
+  const aci = Math.max(-12, Math.min(12, oran * 12));
+  const denge = t === 0 ? "Bu ay henüz kayıt yok" : oran > 0.05 ? "Bu ay artıdasınız" : oran < -0.05 ? "Bu ay eksidesiniz" : "Bu ay dengedesiniz";
+
+  // kategori dağılımı
+  const kaynak = buAy.filter((i) => i.tur === dagilimTur);
+  const map = {};
+  kaynak.forEach((i) => { map[i.kategori] = (map[i.kategori] || 0) + Number(i.tutar); });
+  const dagilim = Object.entries(map).map(([ad, deger], idx) => ({ ad, deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] })).sort((a,b) => b.deger - a.deger);
+  const dagilimToplam = dagilimTur === "gider" ? toplamGider : dagilimTur === "yatirim" ? toplamYatirim : toplamGelir;
+
+  // kişi bazlı gider
+  const kisiGideriA = buAy.filter((i) => i.tur === "gider" && i.kisi === "a").reduce((s,i) => s + Number(i.tutar), 0);
+  const kisiGideriB = buAy.filter((i) => i.tur === "gider" && i.kisi === "b").reduce((s,i) => s + Number(i.tutar), 0);
+  const maxKisi = Math.max(kisiGideriA, kisiGideriB, 1);
+
+  // işlem listesi (filtreli)
+  let filtreli = buAy;
+  if (kisiFiltre !== "hepsi") filtreli = filtreli.filter((i) => i.kisi === kisiFiltre);
+  filtreli = [...filtreli].sort((a,b) => new Date(b.tarih) - new Date(a.tarih));
+
+  const app = document.getElementById("uygulama");
+  app.innerHTML = `
+    <div class="header-top">
+      <div>
+        <h1>Hâne Defteri</h1>
+        <p class="subtitle">${esc(kisiler.a)} &amp; ${esc(kisiler.b)}</p>
+      </div>
+      <button class="icon-btn" onclick="ayarModaliAc()">${IKON.ayarlar}</button>
+    </div>
+    <div class="ay-nav">
+      <button onclick="ayDegistir(-1)">${IKON.sol}</button>
+      <span class="ay-label">${AY_ADLARI[ayIndex]} ${yil}</span>
+      <button onclick="ayDegistir(1)">${IKON.sag}</button>
+    </div>
+
+    <div class="card terazi-card">
+      <svg viewBox="0 0 260 130" style="width:100%;max-width:320px;height:auto;display:block;margin:0 auto;">
+        <rect x="126" y="96" width="8" height="18" fill="#B98B2E"/>
+        <rect x="100" y="112" width="60" height="6" rx="2" fill="#B98B2E"/>
+        <rect x="127" y="30" width="6" height="66" fill="#B98B2E"/>
+        <g style="transform:rotate(${aci}deg);transform-origin:130px 32px;transition:transform .6s ease;">
+          <rect x="30" y="29" width="200" height="5" rx="2" fill="#8E7A4A"/>
+          <line x1="40" y1="31" x2="40" y2="58" stroke="#8E7A4A" stroke-width="2"/>
+          <path d="M20 58 Q40 78 60 58 Z" fill="#4F6F52" opacity="0.85"/>
+          <line x1="220" y1="31" x2="220" y2="58" stroke="#8E7A4A" stroke-width="2"/>
+          <path d="M200 58 Q220 78 240 58 Z" fill="#A85C3B" opacity="0.85"/>
+        </g>
+        <circle cx="130" cy="32" r="5" fill="#B98B2E"/>
+      </svg>
+      <div class="terazi-alt">
+        <span style="color:#4F6F52;font-weight:700;">${TL(toplamGelir)}</span>
+        <span class="denge-yazi">${denge}</span>
+        <span style="color:#A85C3B;font-weight:700;">${TL(toplamGider)}</span>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card"><p class="summary-label">Gelir</p><p class="summary-value" style="color:#4F6F52;">${TL(toplamGelir)}</p></div>
+      <div class="summary-card"><p class="summary-label">Gider</p><p class="summary-value" style="color:#A85C3B;">${TL(toplamGider)}</p></div>
+      <div class="summary-card"><p class="summary-label">Yatırım</p><p class="summary-value" style="color:${YATIRIM_RENGI};">${TL(toplamYatirim)}</p></div>
+      <div class="summary-card"><p class="summary-label">Bakiye</p><p class="summary-value" style="color:${bakiye>=0?'#3F6B66':'#8B3A3A'};">${TL(bakiye)}</p></div>
+    </div>
+
+    <div class="add-row">
+      <button class="add-btn" style="background:#4F6F52;" onclick="formAc('gelir')">${IKON.arti} Gelir</button>
+      <button class="add-btn" style="background:#A85C3B;" onclick="formAc('gider')">${IKON.arti} Gider</button>
+      <button class="add-btn" style="background:${YATIRIM_RENGI};" onclick="formAc('yatirim')">${IKON.arti} Yatırım</button>
+    </div>
+
+    <div class="card">
+      <div class="card-header-row">
+        <h2 class="card-title">Harcama dağılımı</h2>
+        <div class="toggle-pill">
+          <button class="pill-btn ${dagilimTur==='gider'?'active':''}" style="${dagilimTur==='gider'?'background:#A85C3B;':''}" onclick="dagilimSec('gider')">Gider</button>
+          <button class="pill-btn ${dagilimTur==='gelir'?'active':''}" style="${dagilimTur==='gelir'?'background:#4F6F52;':''}" onclick="dagilimSec('gelir')">Gelir</button>
+          <button class="pill-btn ${dagilimTur==='yatirim'?'active':''}" style="${dagilimTur==='yatirim'?'background:'+YATIRIM_RENGI+';':''}" onclick="dagilimSec('yatirim')">Yatırım</button>
+        </div>
+      </div>
+      ${dagilim.length === 0 ? `<p class="bos-metin">Bu ay için henüz ${dagilimTur} kaydı yok.</p>` : `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex-shrink:0;">${donutSvg(dagilim, 128)}</div>
+        <div style="flex:1;min-width:0;">
+          ${dagilim.slice(0,6).map(d => `
+            <div class="legend-row">
+              <span class="legend-dot" style="background:${d.renk};"></span>
+              <span class="legend-ad">${esc(d.ad)}</span>
+              <span class="legend-yuzde">%${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
+            </div>`).join("")}
+        </div>
+      </div>`}
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Kişiye göre gider</h2>
+      <div style="margin-bottom:10px;">
+        <div class="bar-label-row"><span style="font-weight:600;">${esc(kisiler.a)}</span><span style="font-family:monospace;">${TL(kisiGideriA)}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${kisiGideriA/maxKisi*100}%;background:#4F6F52;"></div></div>
+      </div>
+      <div>
+        <div class="bar-label-row"><span style="font-weight:600;">${esc(kisiler.b)}</span><span style="font-family:monospace;">${TL(kisiGideriB)}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${kisiGideriB/maxKisi*100}%;background:#5A7D8C;"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header-row">
+        <h2 class="card-title">İşlemler</h2>
+        <select class="select-mini" onchange="kisiFiltreDegis(this.value)">
+          <option value="hepsi" ${kisiFiltre==='hepsi'?'selected':''}>Herkes</option>
+          <option value="a" ${kisiFiltre==='a'?'selected':''}>${esc(kisiler.a)}</option>
+          <option value="b" ${kisiFiltre==='b'?'selected':''}>${esc(kisiler.b)}</option>
+        </select>
+      </div>
+      ${filtreli.length === 0 ? `<p class="bos-metin">Bu ay için kayıtlı işlem yok.</p>` : filtreli.map(i => `
+        <div class="islem-row">
+          <div style="min-width:0;flex:1;">
+            <p class="islem-kategori">${esc(i.kategori)}</p>
+            <p class="islem-alt">${new Date(i.tarih).toLocaleDateString('tr-TR',{day:'2-digit',month:'short'})} · ${i.kisi==='a'?esc(kisiler.a):esc(kisiler.b)}${i.not?' · '+esc(i.not):''}</p>
+          </div>
+          <span class="islem-tutar" style="color:${i.tur==='gelir'?'#4F6F52':i.tur==='yatirim'?YATIRIM_RENGI:'#A85C3B'};">${i.tur==='gelir'?'+':i.tur==='yatirim'?'→':'−'}${TL(i.tutar)}</span>
+          <button class="sil-btn" onclick="islemSil('${i.id}')">${IKON.sil}</button>
+        </div>`).join("")}
+    </div>
+  `;
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+function dagilimSec(t) { dagilimTur = t; render(); }
+function kisiFiltreDegis(v) { kisiFiltre = v; render(); }
+
+/* ---------- işlem ekleme formu ---------- */
+function formAc(tur) {
+  mevcutTur = tur;
+  const kategoriler = tur === "gelir" ? GELIR_KATEGORI : tur === "yatirim" ? YATIRIM_KATEGORI : GIDER_KATEGORI;
+  const renk = tur === "gelir" ? "#4F6F52" : tur === "yatirim" ? YATIRIM_RENGI : "#A85C3B";
+  const baslik = tur === "gelir" ? "Gelir ekle" : tur === "yatirim" ? "Yatırım ekle" : "Gider ekle";
+  const bugun = new Date().toISOString().slice(0,10);
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "form-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">${baslik}</h3>
+        <button class="icon-btn" onclick="document.getElementById('form-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <div class="toggle-pill">
+        <button class="pill-btn ${tur==='gelir'?'active':''}" style="${tur==='gelir'?'background:#4F6F52;':''}" onclick="formAc('gelir')">Gelir</button>
+        <button class="pill-btn ${tur==='gider'?'active':''}" style="${tur==='gider'?'background:#A85C3B;':''}" onclick="formAc('gider')">Gider</button>
+        <button class="pill-btn ${tur==='yatirim'?'active':''}" style="${tur==='yatirim'?'background:'+YATIRIM_RENGI+';':''}" onclick="formAc('yatirim')">Yatırım</button>
+      </div>
+      <label class="form-label">Tutar (₺)</label>
+      <input id="f-tutar" class="input" type="text" inputmode="decimal" placeholder="0" />
+      <label class="form-label">Kategori</label>
+      <select id="f-kategori" class="input">
+        ${kategoriler.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("")}
+      </select>
+      <label class="form-label">Kim</label>
+      <div class="toggle-pill">
+        <button id="f-kisi-a" class="pill-btn active" style="background:#8E5B6B;" onclick="kisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="f-kisi-b" class="pill-btn" onclick="kisiSec('b')">${esc(kisiler.b)}</button>
+      </div>
+      <label class="form-label">Tarih</label>
+      <input id="f-tarih" class="input" type="date" value="${bugun}" />
+      <label class="form-label">Not (opsiyonel)</label>
+      <input id="f-not" class="input" type="text" placeholder="örn. Migros haftalık alışveriş" />
+      <button class="kaydet-btn" style="background:${renk};" onclick="formGonder()">Kaydet</button>
+    </div>
+  `;
+  const eski = document.getElementById("form-overlay");
+  if (eski) eski.remove();
+  document.body.appendChild(overlay);
+  window.__secilenKisi = "a";
+}
+
+function kisiSec(k) {
+  window.__secilenKisi = k;
+  document.getElementById("f-kisi-a").classList.toggle("active", k === "a");
+  document.getElementById("f-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("f-kisi-b").classList.toggle("active", k === "b");
+  document.getElementById("f-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
+}
+
+function formGonder() {
+  const tutar = parseFloat(document.getElementById("f-tutar").value.replace(",", "."));
+  if (!tutar || tutar <= 0) { alert("Lütfen geçerli bir tutar girin."); return; }
+  const kategori = document.getElementById("f-kategori").value;
+  const tarih = document.getElementById("f-tarih").value;
+  const not = document.getElementById("f-not").value.trim();
+  const kisi = window.__secilenKisi || "a";
+  islemEkle({ tur: mevcutTur, tutar, kategori, kisi, tarih, not });
+  document.getElementById("form-overlay").remove();
+}
+
+/* ---------- ayarlar modalı ---------- */
+function ayarModaliAc() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "ayar-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">Ayarlar</h3>
+        <button class="icon-btn" onclick="document.getElementById('ayar-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <label class="form-label">1. kişi</label>
+      <input id="ayar-a" class="input" value="${esc(kisiler.a)}" />
+      <label class="form-label">2. kişi</label>
+      <input id="ayar-b" class="input" value="${esc(kisiler.b)}" />
+      <p class="bos-metin" style="margin-top:10px;">Hâne kodu: <strong>${esc(haneKodu)}</strong><br/>Bu kodu bilen ve giren herkes bu defteri görür ve düzenler.</p>
+      <button class="kaydet-btn" onclick="ayarKaydet()">Kaydet</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function ayarKaydet() {
+  const a = document.getElementById("ayar-a").value.trim() || "Ben";
+  const b = document.getElementById("ayar-b").value.trim() || "Eşim";
+  kisilerKaydet({ a, b });
+  document.getElementById("ayar-overlay").remove();
+}
+</script>
+</body>
+</html>
