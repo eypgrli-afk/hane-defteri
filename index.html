@@ -157,6 +157,7 @@ const TL = (n) => new Intl.NumberFormat("tr-TR", { style:"currency", currency:"T
 let db = null;
 let haneKodu = null;
 let islemler = {};      // { pushId: {tur,kategori,kisi,tutar,tarih,not} }
+let borclar = {};       // { pushId: {ad,toplamBorc,kalanBakiye,aylikOdeme,odemeGunu} }
 let kisiler = { a: "Ben", b: "Eşim" };
 let ayIndex = new Date().getMonth();
 let yil = new Date().getFullYear();
@@ -209,6 +210,11 @@ function baslat(kod) {
     render();
   });
 
+  kok.child("borclar").on("value", (snap) => {
+    borclar = snap.val() || {};
+    render();
+  });
+
   kok.child("islemler").on("value", (snap) => {
     islemler = snap.val() || {};
     document.getElementById("yukleniyor-ekrani").style.display = "none";
@@ -240,6 +246,40 @@ function islemSil(id) {
 }
 function kisilerKaydet(yeni) {
   db.ref("haneler/" + haneKodu + "/ayarlar").set(yeni);
+}
+
+/* ---------- borç yardımcıları ---------- */
+function borcListesi() {
+  return Object.entries(borclar).map(([id, v]) => ({ id, ...v }));
+}
+function borcEkle(veri) {
+  db.ref("haneler/" + haneKodu + "/borclar").push({
+    ad: veri.ad,
+    toplamBorc: veri.toplamBorc,
+    kalanBakiye: veri.toplamBorc,
+    aylikOdeme: veri.aylikOdeme,
+    odemeGunu: veri.odemeGunu,
+  });
+}
+function borcSil(id) {
+  if (!confirm("Bu borcu silmek istediğinize emin misiniz? (Geçmiş ödeme kayıtları işlemler listesinde kalır.)")) return;
+  db.ref("haneler/" + haneKodu + "/borclar/" + id).remove();
+}
+function borcOdemeYap(id, tutar, kisi, tarih) {
+  const borc = borclar[id];
+  if (!borc) return;
+  const yeniBakiye = Math.max(0, Number(borc.kalanBakiye) - Number(tutar));
+  db.ref("haneler/" + haneKodu + "/borclar/" + id + "/kalanBakiye").set(yeniBakiye);
+  db.ref("haneler/" + haneKodu + "/islemler").push({
+    tur: "gider",
+    kategori: "Borç / Taksit",
+    kisi, tutar: Number(tutar), tarih,
+    not: borc.ad + " ödemesi",
+    borcId: id,
+  });
+}
+function buAyBorcOdendiMi(id) {
+  return buAyIslemleri().some((i) => i.borcId === id);
 }
 
 function ayDegistir(delta) {
@@ -407,6 +447,43 @@ function render() {
 
     <div class="card">
       <div class="card-header-row">
+        <h2 class="card-title">Borçlar</h2>
+        <button class="icon-btn" onclick="borcEkleFormAc()">${IKON.arti}</button>
+      </div>
+      ${borcListesi().length === 0 ? `<p class="bos-metin">Henüz kayıtlı bir borç yok. Kredi kartı veya kredi eklemek için "+" butonuna basın.</p>` : `
+        <div class="bar-label-row" style="margin-bottom:10px;">
+          <span style="font-weight:700;">Toplam kalan borç</span>
+          <span style="font-family:monospace;font-weight:700;color:#8B3A3A;">${TL(borcListesi().reduce((s,b)=>s+Number(b.kalanBakiye),0))}</span>
+        </div>
+        ${borcListesi().map((b) => {
+          const oran = b.toplamBorc > 0 ? Math.min(100, ((b.toplamBorc - b.kalanBakiye) / b.toplamBorc) * 100) : 0;
+          const odendi = buAyBorcOdendiMi(b.id);
+          const bugunGun = new Date().getDate();
+          const gecikti = !odendi && bugunGun > Number(b.odemeGunu);
+          return `
+          <div style="border-top:1px solid #EFE7D4;padding:10px 0;">
+            <div class="bar-label-row">
+              <span style="font-weight:600;">${esc(b.ad)}</span>
+              <span style="font-family:monospace;">${TL(b.kalanBakiye)} / ${TL(b.toplamBorc)}</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:${oran}%;background:#8B3A3A;"></div></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <span style="font-size:11.5px;color:#8A7F6A;">
+                Aylık: ${TL(b.aylikOdeme)} · Her ayın ${esc(String(b.odemeGunu))}. günü
+                ${odendi ? ' · <span style="color:#4F6F52;font-weight:600;">✓ bu ay ödendi</span>' : gecikti ? ' · <span style="color:#8B3A3A;font-weight:600;">⚠ ödeme günü geçti</span>' : ''}
+              </span>
+              <div style="display:flex;gap:6px;flex-shrink:0;">
+                <button class="pill-btn" style="background:#23342E;color:#fff;padding:6px 10px;" onclick="borcOdemeFormAc('${b.id}')">Ödeme yap</button>
+                <button class="sil-btn" onclick="borcSil('${b.id}')">${IKON.sil}</button>
+              </div>
+            </div>
+          </div>`;
+        }).join("")}
+      `}
+    </div>
+
+    <div class="card">
+      <div class="card-header-row">
         <h2 class="card-title">İşlemler</h2>
         <select class="select-mini" onchange="kisiFiltreDegis(this.value)">
           <option value="hepsi" ${kisiFiltre==='hepsi'?'selected':''}>Herkes</option>
@@ -499,6 +576,89 @@ function formGonder() {
 }
 
 /* ---------- ayarlar modalı ---------- */
+/* ---------- borç ekleme formu ---------- */
+function borcEkleFormAc() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "borc-ekle-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">Borç ekle</h3>
+        <button class="icon-btn" onclick="document.getElementById('borc-ekle-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <label class="form-label">Ad (örn. X Bankası Kredi Kartı)</label>
+      <input id="b-ad" class="input" type="text" placeholder="Kredi kartı / kredi adı" />
+      <label class="form-label">Toplam borç (₺)</label>
+      <input id="b-toplam" class="input" type="text" inputmode="decimal" placeholder="0" />
+      <label class="form-label">Aylık ödeme tutarı (₺)</label>
+      <input id="b-aylik" class="input" type="text" inputmode="decimal" placeholder="0" />
+      <label class="form-label">Her ayın hangi günü ödeniyor?</label>
+      <input id="b-gun" class="input" type="number" min="1" max="31" placeholder="örn. 15" />
+      <button class="kaydet-btn" style="background:#8B3A3A;" onclick="borcEkleGonder()">Kaydet</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function borcEkleGonder() {
+  const ad = document.getElementById("b-ad").value.trim();
+  const toplamBorc = parseFloat(document.getElementById("b-toplam").value.replace(",", "."));
+  const aylikOdeme = parseFloat(document.getElementById("b-aylik").value.replace(",", "."));
+  const odemeGunu = parseInt(document.getElementById("b-gun").value, 10);
+  if (!ad) { alert("Lütfen bir ad girin."); return; }
+  if (!toplamBorc || toplamBorc <= 0) { alert("Lütfen geçerli bir toplam borç girin."); return; }
+  if (!aylikOdeme || aylikOdeme <= 0) { alert("Lütfen geçerli bir aylık ödeme tutarı girin."); return; }
+  if (!odemeGunu || odemeGunu < 1 || odemeGunu > 31) { alert("Lütfen 1-31 arası bir gün girin."); return; }
+  borcEkle({ ad, toplamBorc, aylikOdeme, odemeGunu });
+  document.getElementById("borc-ekle-overlay").remove();
+}
+
+/* ---------- borç ödeme formu ---------- */
+function borcOdemeFormAc(id) {
+  const b = borclar[id];
+  if (!b) return;
+  const bugun = new Date().toISOString().slice(0,10);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "borc-odeme-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">${esc(b.ad)} — ödeme yap</h3>
+        <button class="icon-btn" onclick="document.getElementById('borc-odeme-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <p class="bos-metin">Kalan bakiye: <strong>${TL(b.kalanBakiye)}</strong></p>
+      <label class="form-label">Ödeme tutarı (₺)</label>
+      <input id="bo-tutar" class="input" type="text" inputmode="decimal" value="${Math.min(b.aylikOdeme, b.kalanBakiye)}" />
+      <label class="form-label">Kim ödedi</label>
+      <div class="toggle-pill">
+        <button id="bo-kisi-a" class="pill-btn active" style="background:#8E5B6B;" onclick="borcOdemeKisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="bo-kisi-b" class="pill-btn" onclick="borcOdemeKisiSec('b')">${esc(kisiler.b)}</button>
+      </div>
+      <label class="form-label">Tarih</label>
+      <input id="bo-tarih" class="input" type="date" value="${bugun}" />
+      <button class="kaydet-btn" style="background:#23342E;" onclick="borcOdemeGonder('${id}')">Ödemeyi kaydet</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  window.__borcOdemeKisi = "a";
+}
+function borcOdemeKisiSec(k) {
+  window.__borcOdemeKisi = k;
+  document.getElementById("bo-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("bo-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
+}
+function borcOdemeGonder(id) {
+  const tutar = parseFloat(document.getElementById("bo-tutar").value.replace(",", "."));
+  if (!tutar || tutar <= 0) { alert("Lütfen geçerli bir tutar girin."); return; }
+  const tarih = document.getElementById("bo-tarih").value;
+  const kisi = window.__borcOdemeKisi || "a";
+  borcOdemeYap(id, tutar, kisi, tarih);
+  document.getElementById("borc-odeme-overlay").remove();
+}
+
 function ayarModaliAc() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
