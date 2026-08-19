@@ -157,13 +157,15 @@ const TL = (n) => new Intl.NumberFormat("tr-TR", { style:"currency", currency:"T
 let db = null;
 let haneKodu = null;
 let islemler = {};      // { pushId: {tur,kategori,kisi,tutar,tarih,not} }
-let borclar = {};       // { pushId: {ad,toplamBorc,kalanBakiye,aylikOdeme,odemeGunu} }
+let kartlar = {};       // { pushId: {ad, kalanBakiye} } — kredi kartı / kredi bakiyesi (sürekli güncellenen)
 let kisiler = { a: "Ben", b: "Eşim" };
 let ayIndex = new Date().getMonth();
 let yil = new Date().getFullYear();
 let kisiFiltre = "hepsi";
 let dagilimTur = "gider";
 let mevcutTur = "gider";
+let raporYili = new Date().getFullYear();
+let raporDagilimTur = "gider";
 
 /* ---------- başlangıç ---------- */
 window.addEventListener("DOMContentLoaded", () => {
@@ -210,8 +212,8 @@ function baslat(kod) {
     render();
   });
 
-  kok.child("borclar").on("value", (snap) => {
-    borclar = snap.val() || {};
+  kok.child("kartlar").on("value", (snap) => {
+    kartlar = snap.val() || {};
     render();
   });
 
@@ -248,38 +250,81 @@ function kisilerKaydet(yeni) {
   db.ref("haneler/" + haneKodu + "/ayarlar").set(yeni);
 }
 
-/* ---------- borç yardımcıları ---------- */
-function borcListesi() {
-  return Object.entries(borclar).map(([id, v]) => ({ id, ...v }));
+/* ---------- kart yardımcıları ---------- */
+function kartListesi() {
+  return Object.entries(kartlar).map(([id, v]) => ({ id, ...v }));
 }
-function borcEkle(veri) {
-  db.ref("haneler/" + haneKodu + "/borclar").push({
-    ad: veri.ad,
-    toplamBorc: veri.toplamBorc,
-    kalanBakiye: veri.toplamBorc,
-    aylikOdeme: veri.aylikOdeme,
-    odemeGunu: veri.odemeGunu,
+function kartBolumRender(baslik, liste, tur) {
+  const bosMetin = tur === "sabitkredi"
+    ? `Henüz kayıtlı bir krediniz yok. Araba kredisi, ihtiyaç kredisi gibi sabit taksitli borçlarınızı eklemek için "+" butonuna basın.`
+    : `Henüz kayıtlı bir kredi kartınız yok. Eklemek için "+" butonuna basın.`;
+  return `
+    <div class="card">
+      <div class="card-header-row">
+        <h2 class="card-title">${baslik}</h2>
+        <button class="icon-btn" onclick="kartEkleFormAc('${tur}')">${IKON.arti}</button>
+      </div>
+      ${liste.length === 0 ? `<p class="bos-metin">${bosMetin}</p>` : `
+        <div class="bar-label-row" style="margin-bottom:10px;">
+          <span style="font-weight:700;">Toplam</span>
+          <span style="font-family:monospace;font-weight:700;font-size:15px;color:#8B3A3A;">${TL(liste.reduce((s,k)=>s+Number(k.kalanBakiye),0))}</span>
+        </div>
+        ${liste.map((k) => `
+          <div style="border-top:1px solid #EFE7D4;padding:10px 0;">
+            <div class="bar-label-row">
+              <span style="font-weight:600;">${esc(k.ad)} <span style="font-size:11px;font-weight:600;color:#fff;background:${k.kisi==='b'?'#5A7D8C':'#8E5B6B'};border-radius:6px;padding:2px 7px;margin-left:4px;">${k.kisi==='b'?esc(kisiler.b):esc(kisiler.a)}</span></span>
+              <span style="font-family:monospace;font-weight:700;color:#8B3A3A;">${TL(k.kalanBakiye)}</span>
+            </div>
+            ${k.aylikOdeme > 0 ? `<p style="font-size:11.5px;color:#8A7F6A;margin:2px 0 0;">Aylık sabit taksit: ${TL(k.aylikOdeme)}</p>` : ""}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+              ${tur === "sabitkredi" ? "" : `
+              <button class="pill-btn" style="background:#EFE7D4;padding:6px 10px;" onclick="kartHarcamaFormAc('${k.id}')">+ Harcama</button>
+              <button class="pill-btn" style="background:#EFE7D4;padding:6px 10px;" onclick="kartEkstreFormAc('${k.id}')">Ekstre güncelle</button>
+              `}
+              <button class="pill-btn" style="background:#23342E;color:#fff;padding:6px 10px;" onclick="kartOdemeFormAc('${k.id}')">Ödeme yap</button>
+              <button class="sil-btn" onclick="kartSil('${k.id}')">${IKON.sil}</button>
+            </div>
+          </div>`).join("")}
+      `}
+    </div>
+  `;
+}
+function kartEkle(ad, baslangicBakiye, kisi, aylikOdeme, tur) {
+  db.ref("haneler/" + haneKodu + "/kartlar").push({
+    ad,
+    kalanBakiye: baslangicBakiye || 0,
+    kisi: kisi || "a",
+    aylikOdeme: aylikOdeme || 0,
+    tur: tur || "kredikart",
   });
 }
-function borcSil(id) {
-  if (!confirm("Bu borcu silmek istediğinize emin misiniz? (Geçmiş ödeme kayıtları işlemler listesinde kalır.)")) return;
-  db.ref("haneler/" + haneKodu + "/borclar/" + id).remove();
+function kartSil(id) {
+  if (!confirm("Bu kartı silmek istediğinize emin misiniz? (Geçmiş ödeme kayıtları işlemler listesinde kalır.)")) return;
+  db.ref("haneler/" + haneKodu + "/kartlar/" + id).remove();
 }
-function borcOdemeYap(id, tutar, kisi, tarih) {
-  const borc = borclar[id];
-  if (!borc) return;
-  const yeniBakiye = Math.max(0, Number(borc.kalanBakiye) - Number(tutar));
-  db.ref("haneler/" + haneKodu + "/borclar/" + id + "/kalanBakiye").set(yeniBakiye);
+function kartHarcamaEkle(id, tutar) {
+  const kart = kartlar[id];
+  if (!kart) return;
+  const yeniBakiye = Number(kart.kalanBakiye) + Number(tutar);
+  db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(yeniBakiye);
+}
+function kartEkstreGuncelle(id, yeniBakiye) {
+  const kart = kartlar[id];
+  if (!kart) return;
+  db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(Number(yeniBakiye));
+}
+function kartOdemeYap(id, tutar, kisi, tarih) {
+  const kart = kartlar[id];
+  if (!kart) return;
+  const yeniBakiye = Math.max(0, Number(kart.kalanBakiye) - Number(tutar));
+  db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(yeniBakiye);
   db.ref("haneler/" + haneKodu + "/islemler").push({
     tur: "gider",
-    kategori: "Borç / Taksit",
+    kategori: "Kredi Kartı Ödemesi",
     kisi, tutar: Number(tutar), tarih,
-    not: borc.ad + " ödemesi",
-    borcId: id,
+    not: kart.ad + " ödemesi",
+    kartId: id,
   });
-}
-function buAyBorcOdendiMi(id) {
-  return buAyIslemleri().some((i) => i.borcId === id);
 }
 
 function ayDegistir(delta) {
@@ -317,6 +362,34 @@ function donutSvg(dilimler, boyut) {
     });
   }
   return `<svg width="${boyut}" height="${boyut}" viewBox="0 0 ${boyut} ${boyut}">${paths}</svg>`;
+}
+
+const AY_KISA = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+
+function trendSvg(gelirArr, giderArr, w, h) {
+  const solPay = 6, altPay = 20, ustPay = 10, sagPay = 6;
+  const genW = w - solPay - sagPay, genH = h - altPay - ustPay;
+  const maxDeger = Math.max(1, ...gelirArr, ...giderArr);
+  const xOf = (i) => solPay + (i / 11) * genW;
+  const yOf = (v) => ustPay + genH - (v / maxDeger) * genH;
+  const cizgiYolu = (arr) => arr.map((v, i) => `${i === 0 ? "M" : "L"} ${xOf(i).toFixed(1)} ${yOf(v).toFixed(1)}`).join(" ");
+
+  let noktalar = "";
+  gelirArr.forEach((v, i) => { noktalar += `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="2.5" fill="#4F6F52" />`; });
+  giderArr.forEach((v, i) => { noktalar += `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="2.5" fill="#A85C3B" />`; });
+
+  let etiketler = "";
+  for (let i = 0; i < 12; i += 2) {
+    etiketler += `<text x="${xOf(i).toFixed(1)}" y="${h - 4}" font-size="8" fill="#8A7F6A" text-anchor="middle">${AY_KISA[i]}</text>`;
+  }
+
+  return `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <line x1="${solPay}" y1="${ustPay + genH}" x2="${w - sagPay}" y2="${ustPay + genH}" stroke="#EFE7D4" stroke-width="1" />
+    <path d="${cizgiYolu(gelirArr)}" fill="none" stroke="#4F6F52" stroke-width="2" />
+    <path d="${cizgiYolu(giderArr)}" fill="none" stroke="#A85C3B" stroke-width="2" />
+    ${noktalar}
+    ${etiketler}
+  </svg>`;
 }
 
 const IKON = {
@@ -374,6 +447,9 @@ function render() {
       <button onclick="ayDegistir(-1)">${IKON.sol}</button>
       <span class="ay-label">${AY_ADLARI[ayIndex]} ${yil}</span>
       <button onclick="ayDegistir(1)">${IKON.sag}</button>
+    </div>
+    <div style="text-align:center;margin-top:8px;">
+      <button class="pill-btn" style="background:#23342E;color:#fff;padding:7px 14px;flex:none;" onclick="yillikRaporAc()">📊 Yıllık Rapor</button>
     </div>
 
     <div class="card terazi-card">
@@ -445,42 +521,8 @@ function render() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header-row">
-        <h2 class="card-title">Borçlar</h2>
-        <button class="icon-btn" onclick="borcEkleFormAc()">${IKON.arti}</button>
-      </div>
-      ${borcListesi().length === 0 ? `<p class="bos-metin">Henüz kayıtlı bir borç yok. Kredi kartı veya kredi eklemek için "+" butonuna basın.</p>` : `
-        <div class="bar-label-row" style="margin-bottom:10px;">
-          <span style="font-weight:700;">Toplam kalan borç</span>
-          <span style="font-family:monospace;font-weight:700;color:#8B3A3A;">${TL(borcListesi().reduce((s,b)=>s+Number(b.kalanBakiye),0))}</span>
-        </div>
-        ${borcListesi().map((b) => {
-          const oran = b.toplamBorc > 0 ? Math.min(100, ((b.toplamBorc - b.kalanBakiye) / b.toplamBorc) * 100) : 0;
-          const odendi = buAyBorcOdendiMi(b.id);
-          const bugunGun = new Date().getDate();
-          const gecikti = !odendi && bugunGun > Number(b.odemeGunu);
-          return `
-          <div style="border-top:1px solid #EFE7D4;padding:10px 0;">
-            <div class="bar-label-row">
-              <span style="font-weight:600;">${esc(b.ad)}</span>
-              <span style="font-family:monospace;">${TL(b.kalanBakiye)} / ${TL(b.toplamBorc)}</span>
-            </div>
-            <div class="bar-track"><div class="bar-fill" style="width:${oran}%;background:#8B3A3A;"></div></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-              <span style="font-size:11.5px;color:#8A7F6A;">
-                Aylık: ${TL(b.aylikOdeme)} · Her ayın ${esc(String(b.odemeGunu))}. günü
-                ${odendi ? ' · <span style="color:#4F6F52;font-weight:600;">✓ bu ay ödendi</span>' : gecikti ? ' · <span style="color:#8B3A3A;font-weight:600;">⚠ ödeme günü geçti</span>' : ''}
-              </span>
-              <div style="display:flex;gap:6px;flex-shrink:0;">
-                <button class="pill-btn" style="background:#23342E;color:#fff;padding:6px 10px;" onclick="borcOdemeFormAc('${b.id}')">Ödeme yap</button>
-                <button class="sil-btn" onclick="borcSil('${b.id}')">${IKON.sil}</button>
-              </div>
-            </div>
-          </div>`;
-        }).join("")}
-      `}
-    </div>
+    ${kartBolumRender("Kredi Kartları", kartListesi().filter((k) => k.tur !== "sabitkredi"), "kredikart")}
+    ${kartBolumRender("Krediler", kartListesi().filter((k) => k.tur === "sabitkredi"), "sabitkredi")}
 
     <div class="card">
       <div class="card-header-row">
@@ -575,88 +617,293 @@ function formGonder() {
   document.getElementById("form-overlay").remove();
 }
 
-/* ---------- ayarlar modalı ---------- */
-/* ---------- borç ekleme formu ---------- */
-function borcEkleFormAc() {
+/* ---------- kart / kredi ekleme formu ---------- */
+function kartEkleFormAc(tur) {
+  const baslik = tur === "sabitkredi" ? "Kredi ekle" : "Kredi kartı ekle";
+  const adPlaceholder = tur === "sabitkredi" ? "örn. Araba Kredisi" : "örn. X Bankası Kredi Kartı";
+  const aylikSatiri = tur === "sabitkredi"
+    ? `<label class="form-label">Aylık sabit taksit tutarı (₺)</label>
+       <input id="k-aylik" class="input" type="text" inputmode="decimal" placeholder="0" />`
+    : `<label class="form-label">Aylık ödeme tutarı (₺) — opsiyonel, biliyorsanız</label>
+       <input id="k-aylik" class="input" type="text" inputmode="decimal" placeholder="0" />`;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.id = "borc-ekle-overlay";
+  overlay.id = "kart-ekle-overlay";
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-card" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <h3 class="modal-title">Borç ekle</h3>
-        <button class="icon-btn" onclick="document.getElementById('borc-ekle-overlay').remove()">${IKON.kapat}</button>
+        <h3 class="modal-title">${baslik}</h3>
+        <button class="icon-btn" onclick="document.getElementById('kart-ekle-overlay').remove()">${IKON.kapat}</button>
       </div>
-      <label class="form-label">Ad (örn. X Bankası Kredi Kartı)</label>
-      <input id="b-ad" class="input" type="text" placeholder="Kredi kartı / kredi adı" />
-      <label class="form-label">Toplam borç (₺)</label>
-      <input id="b-toplam" class="input" type="text" inputmode="decimal" placeholder="0" />
-      <label class="form-label">Aylık ödeme tutarı (₺)</label>
-      <input id="b-aylik" class="input" type="text" inputmode="decimal" placeholder="0" />
-      <label class="form-label">Her ayın hangi günü ödeniyor?</label>
-      <input id="b-gun" class="input" type="number" min="1" max="31" placeholder="örn. 15" />
-      <button class="kaydet-btn" style="background:#8B3A3A;" onclick="borcEkleGonder()">Kaydet</button>
+      <label class="form-label">Ad</label>
+      <input id="k-ad" class="input" type="text" placeholder="${adPlaceholder}" />
+      <label class="form-label">Kime ait</label>
+      <div class="toggle-pill">
+        <button id="k-kisi-a" class="pill-btn active" style="background:#8E5B6B;" onclick="kartEkleKisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="k-kisi-b" class="pill-btn" onclick="kartEkleKisiSec('b')">${esc(kisiler.b)}</button>
+      </div>
+      <label class="form-label">Şu anki borç bakiyesi (₺) — varsa</label>
+      <input id="k-bakiye" class="input" type="text" inputmode="decimal" placeholder="0" />
+      ${aylikSatiri}
+      <button class="kaydet-btn" style="background:#8B3A3A;" onclick="kartEkleGonder()">Kaydet</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  window.__kartEkleKisi = "a";
+  window.__kartEkleTur = tur === "sabitkredi" ? "sabitkredi" : "kredikart";
+}
+function kartEkleKisiSec(k) {
+  window.__kartEkleKisi = k;
+  document.getElementById("k-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("k-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
+}
+function kartEkleGonder() {
+  const ad = document.getElementById("k-ad").value.trim();
+  const bakiyeStr = document.getElementById("k-bakiye").value.trim();
+  const bakiye = bakiyeStr ? parseFloat(bakiyeStr.replace(",", ".")) : 0;
+  const aylikStr = document.getElementById("k-aylik").value.trim();
+  const aylikOdeme = aylikStr ? parseFloat(aylikStr.replace(",", ".")) : 0;
+  const kisi = window.__kartEkleKisi || "a";
+  const tur = window.__kartEkleTur || "kredikart";
+  if (!ad) { alert("Lütfen bir ad girin."); return; }
+  kartEkle(ad, bakiye || 0, kisi, aylikOdeme || 0, tur);
+  document.getElementById("kart-ekle-overlay").remove();
+}
+
+/* ---------- kart harcaması formu ---------- */
+function kartHarcamaFormAc(id) {
+  const k = kartlar[id];
+  if (!k) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "kart-harcama-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">${esc(k.ad)} — harcama ekle</h3>
+        <button class="icon-btn" onclick="document.getElementById('kart-harcama-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <p class="bos-metin">Şu anki bakiye: <strong>${TL(k.kalanBakiye)}</strong>. Bu kartla yaptığınız harcama bu tutara eklenir, ekstre gelene kadar "Gider" olarak sayılmaz.</p>
+      <label class="form-label">Harcama tutarı (₺)</label>
+      <input id="kh-tutar" class="input" type="text" inputmode="decimal" placeholder="0" autofocus />
+      <label class="form-label">Not (opsiyonel)</label>
+      <input id="kh-not" class="input" type="text" placeholder="örn. ayakkabı, 6 taksit" />
+      <button class="kaydet-btn" style="background:#8B3A3A;" onclick="kartHarcamaGonder('${id}')">Kaydet</button>
     </div>
   `;
   document.body.appendChild(overlay);
 }
-function borcEkleGonder() {
-  const ad = document.getElementById("b-ad").value.trim();
-  const toplamBorc = parseFloat(document.getElementById("b-toplam").value.replace(",", "."));
-  const aylikOdeme = parseFloat(document.getElementById("b-aylik").value.replace(",", "."));
-  const odemeGunu = parseInt(document.getElementById("b-gun").value, 10);
-  if (!ad) { alert("Lütfen bir ad girin."); return; }
-  if (!toplamBorc || toplamBorc <= 0) { alert("Lütfen geçerli bir toplam borç girin."); return; }
-  if (!aylikOdeme || aylikOdeme <= 0) { alert("Lütfen geçerli bir aylık ödeme tutarı girin."); return; }
-  if (!odemeGunu || odemeGunu < 1 || odemeGunu > 31) { alert("Lütfen 1-31 arası bir gün girin."); return; }
-  borcEkle({ ad, toplamBorc, aylikOdeme, odemeGunu });
-  document.getElementById("borc-ekle-overlay").remove();
+function kartHarcamaGonder(id) {
+  const tutar = parseFloat(document.getElementById("kh-tutar").value.replace(",", "."));
+  if (!tutar || tutar <= 0) { alert("Lütfen geçerli bir tutar girin."); return; }
+  kartHarcamaEkle(id, tutar);
+  document.getElementById("kart-harcama-overlay").remove();
 }
 
-/* ---------- borç ödeme formu ---------- */
-function borcOdemeFormAc(id) {
-  const b = borclar[id];
-  if (!b) return;
+/* ---------- kart ekstre güncelleme formu ---------- */
+function kartEkstreFormAc(id) {
+  const k = kartlar[id];
+  if (!k) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "kart-ekstre-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">${esc(k.ad)} — ekstre bakiyesini güncelle</h3>
+        <button class="icon-btn" onclick="document.getElementById('kart-ekstre-overlay').remove()">${IKON.kapat}</button>
+      </div>
+      <p class="bos-metin">Şu anki kayıtlı bakiye: <strong>${TL(k.kalanBakiye)}</strong>. Ekstrenizde yazan "toplam borç / dönem sonu bakiye" rakamını girin — faiz dahil her şey buna otomatik yansır, siz hesap yapmazsınız.</p>
+      <label class="form-label">Ekstredeki toplam borç (₺)</label>
+      <input id="ke-tutar" class="input" type="text" inputmode="decimal" value="${k.kalanBakiye}" autofocus />
+      <button class="kaydet-btn" style="background:#8B3A3A;" onclick="kartEkstreGonder('${id}')">Güncelle</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function kartEkstreGonder(id) {
+  const tutar = parseFloat(document.getElementById("ke-tutar").value.replace(",", "."));
+  if (tutar === null || tutar === undefined || isNaN(tutar) || tutar < 0) { alert("Lütfen geçerli bir tutar girin."); return; }
+  kartEkstreGuncelle(id, tutar);
+  document.getElementById("kart-ekstre-overlay").remove();
+}
+
+/* ---------- kart ödeme formu ---------- */
+function kartOdemeFormAc(id) {
+  const k = kartlar[id];
+  if (!k) return;
   const bugun = new Date().toISOString().slice(0,10);
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.id = "borc-odeme-overlay";
+  overlay.id = "kart-odeme-overlay";
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-card" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <h3 class="modal-title">${esc(b.ad)} — ödeme yap</h3>
-        <button class="icon-btn" onclick="document.getElementById('borc-odeme-overlay').remove()">${IKON.kapat}</button>
+        <h3 class="modal-title">${esc(k.ad)} — ödeme yap</h3>
+        <button class="icon-btn" onclick="document.getElementById('kart-odeme-overlay').remove()">${IKON.kapat}</button>
       </div>
-      <p class="bos-metin">Kalan bakiye: <strong>${TL(b.kalanBakiye)}</strong></p>
-      <label class="form-label">Ödeme tutarı (₺)</label>
-      <input id="bo-tutar" class="input" type="text" inputmode="decimal" value="${Math.min(b.aylikOdeme, b.kalanBakiye)}" />
+      <p class="bos-metin">Kalan bakiye: <strong>${TL(k.kalanBakiye)}</strong></p>
+      <label class="form-label">Ödeme tutarı (₺) — asgari ya da tam, ne öderseniz</label>
+      <input id="ko-tutar" class="input" type="text" inputmode="decimal" value="${k.aylikOdeme > 0 ? Math.min(k.aylikOdeme, k.kalanBakiye) : k.kalanBakiye}" />
       <label class="form-label">Kim ödedi</label>
       <div class="toggle-pill">
-        <button id="bo-kisi-a" class="pill-btn active" style="background:#8E5B6B;" onclick="borcOdemeKisiSec('a')">${esc(kisiler.a)}</button>
-        <button id="bo-kisi-b" class="pill-btn" onclick="borcOdemeKisiSec('b')">${esc(kisiler.b)}</button>
+        <button id="ko-kisi-a" class="pill-btn ${k.kisi!=='b'?'active':''}" style="${k.kisi!=='b'?'background:#8E5B6B;':''}" onclick="kartOdemeKisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="ko-kisi-b" class="pill-btn ${k.kisi==='b'?'active':''}" style="${k.kisi==='b'?'background:#8E5B6B;':''}" onclick="kartOdemeKisiSec('b')">${esc(kisiler.b)}</button>
       </div>
       <label class="form-label">Tarih</label>
-      <input id="bo-tarih" class="input" type="date" value="${bugun}" />
-      <button class="kaydet-btn" style="background:#23342E;" onclick="borcOdemeGonder('${id}')">Ödemeyi kaydet</button>
+      <input id="ko-tarih" class="input" type="date" value="${bugun}" />
+      <button class="kaydet-btn" style="background:#23342E;" onclick="kartOdemeGonder('${id}')">Ödemeyi kaydet</button>
     </div>
   `;
   document.body.appendChild(overlay);
-  window.__borcOdemeKisi = "a";
+  window.__kartOdemeKisi = k.kisi === "b" ? "b" : "a";
 }
-function borcOdemeKisiSec(k) {
-  window.__borcOdemeKisi = k;
-  document.getElementById("bo-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
-  document.getElementById("bo-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
+function kartOdemeKisiSec(k) {
+  window.__kartOdemeKisi = k;
+  document.getElementById("ko-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("ko-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
 }
-function borcOdemeGonder(id) {
-  const tutar = parseFloat(document.getElementById("bo-tutar").value.replace(",", "."));
+function kartOdemeGonder(id) {
+  const tutar = parseFloat(document.getElementById("ko-tutar").value.replace(",", "."));
   if (!tutar || tutar <= 0) { alert("Lütfen geçerli bir tutar girin."); return; }
-  const tarih = document.getElementById("bo-tarih").value;
-  const kisi = window.__borcOdemeKisi || "a";
-  borcOdemeYap(id, tutar, kisi, tarih);
-  document.getElementById("borc-odeme-overlay").remove();
+  const tarih = document.getElementById("ko-tarih").value;
+  const kisi = window.__kartOdemeKisi || "a";
+  kartOdemeYap(id, tutar, kisi, tarih);
+  document.getElementById("kart-odeme-overlay").remove();
+}
+
+/* ---------- ayarlar modalı ---------- */
+/* ---------- yıllık rapor ---------- */
+function yilIslemleri(yil) {
+  return islemListesi().filter((i) => new Date(i.tarih).getFullYear() === yil);
+}
+function aylikDiziler(yil, tur) {
+  const dizi = new Array(12).fill(0);
+  yilIslemleri(yil).filter((i) => i.tur === tur).forEach((i) => {
+    dizi[new Date(i.tarih).getMonth()] += Number(i.tutar);
+  });
+  return dizi;
+}
+function yuzdeDegisim(yeni, eski) {
+  if (!eski) return yeni ? "yeni" : "—";
+  const yuzde = ((yeni - eski) / eski) * 100;
+  const isaret = yuzde > 0 ? "+" : "";
+  return `${isaret}${yuzde.toFixed(0)}%`;
+}
+
+function yillikRaporAc() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "rapor-overlay";
+  overlay.style.alignItems = "center";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal-card" style="border-radius:20px;max-height:92vh;" onclick="event.stopPropagation()" id="rapor-icerik"></div>`;
+  document.body.appendChild(overlay);
+  yillikRaporRender();
+}
+function yillikRaporKapat() {
+  const el = document.getElementById("rapor-overlay");
+  if (el) el.remove();
+}
+function yillikRaporYilDegistir(delta) {
+  raporYili += delta;
+  yillikRaporRender();
+}
+function yillikRaporDagilimSec(tur) {
+  raporDagilimTur = tur;
+  yillikRaporRender();
+}
+function yillikRaporRender() {
+  const icerik = document.getElementById("rapor-icerik");
+  if (!icerik) return;
+
+  const buYilIslemler = yilIslemleri(raporYili);
+  const gecenYilIslemler = yilIslemleri(raporYili - 1);
+  const buGelir = toplam("gelir", buYilIslemler);
+  const buGider = toplam("gider", buYilIslemler);
+  const buYatirim = toplam("yatirim", buYilIslemler);
+  const gecenGelir = toplam("gelir", gecenYilIslemler);
+  const gecenGider = toplam("gider", gecenYilIslemler);
+
+  const aylikGelir = aylikDiziler(raporYili, "gelir");
+  const aylikGider = aylikDiziler(raporYili, "gider");
+
+  const kaynak = buYilIslemler.filter((i) => i.tur === raporDagilimTur);
+  const map = {};
+  kaynak.forEach((i) => { map[i.kategori] = (map[i.kategori] || 0) + Number(i.tutar); });
+  const dagilim = Object.entries(map).map(([ad, deger], idx) => ({ ad, deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] })).sort((a,b) => b.deger - a.deger);
+  const dagilimToplam = raporDagilimTur === "gider" ? buGider : raporDagilimTur === "yatirim" ? buYatirim : buGelir;
+
+  const kisiA = buYilIslemler.filter((i) => i.tur === "gider" && i.kisi === "a").reduce((s,i) => s + Number(i.tutar), 0);
+  const kisiB = buYilIslemler.filter((i) => i.tur === "gider" && i.kisi === "b").reduce((s,i) => s + Number(i.tutar), 0);
+  const maxKisi = Math.max(kisiA, kisiB, 1);
+
+  icerik.innerHTML = `
+    <div class="modal-header">
+      <h3 class="modal-title">Yıllık Rapor</h3>
+      <button class="icon-btn" onclick="yillikRaporKapat()">${IKON.kapat}</button>
+    </div>
+    <div class="ay-nav" style="margin-bottom:6px;">
+      <button onclick="yillikRaporYilDegistir(-1)">${IKON.sol}</button>
+      <span class="ay-label">${raporYili}</span>
+      <button onclick="yillikRaporYilDegistir(1)">${IKON.sag}</button>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card"><p class="summary-label">Gelir <span style="color:${buGelir>=gecenGelir?'#4F6F52':'#A85C3B'};">(${yuzdeDegisim(buGelir, gecenGelir)})</span></p><p class="summary-value" style="color:#4F6F52;">${TL(buGelir)}</p></div>
+      <div class="summary-card"><p class="summary-label">Gider <span style="color:${buGider<=gecenGider?'#4F6F52':'#A85C3B'};">(${yuzdeDegisim(buGider, gecenGider)})</span></p><p class="summary-value" style="color:#A85C3B;">${TL(buGider)}</p></div>
+      <div class="summary-card"><p class="summary-label">Yatırım</p><p class="summary-value" style="color:${YATIRIM_RENGI};">${TL(buYatirim)}</p></div>
+      <div class="summary-card"><p class="summary-label">Bakiye</p><p class="summary-value" style="color:${(buGelir-buGider-buYatirim)>=0?'#3F6B66':'#8B3A3A'};">${TL(buGelir-buGider-buYatirim)}</p></div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <h2 class="card-title">Ay ay gelir / gider</h2>
+      <div style="margin:8px 0 4px;">${trendSvg(aylikGelir, aylikGider, 300, 110)}</div>
+      <div style="display:flex;gap:14px;justify-content:center;font-size:11.5px;color:#7A6A55;">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4F6F52;margin-right:4px;"></span>Gelir</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#A85C3B;margin-right:4px;"></span>Gider</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header-row">
+        <h2 class="card-title">Yıllık dağılım</h2>
+        <div class="toggle-pill">
+          <button class="pill-btn ${raporDagilimTur==='gider'?'active':''}" style="${raporDagilimTur==='gider'?'background:#A85C3B;':''}" onclick="yillikRaporDagilimSec('gider')">Gider</button>
+          <button class="pill-btn ${raporDagilimTur==='gelir'?'active':''}" style="${raporDagilimTur==='gelir'?'background:#4F6F52;':''}" onclick="yillikRaporDagilimSec('gelir')">Gelir</button>
+          <button class="pill-btn ${raporDagilimTur==='yatirim'?'active':''}" style="${raporDagilimTur==='yatirim'?'background:'+YATIRIM_RENGI+';':''}" onclick="yillikRaporDagilimSec('yatirim')">Yatırım</button>
+        </div>
+      </div>
+      ${dagilim.length === 0 ? `<p class="bos-metin">Bu yıl için henüz ${raporDagilimTur} kaydı yok.</p>` : `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex-shrink:0;">${donutSvg(dagilim, 128)}</div>
+        <div style="flex:1;min-width:0;">
+          ${dagilim.slice(0,6).map(d => `
+            <div class="legend-row">
+              <span class="legend-dot" style="background:${d.renk};"></span>
+              <span class="legend-ad">${esc(d.ad)}</span>
+              <span class="legend-yuzde">%${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
+            </div>`).join("")}
+        </div>
+      </div>`}
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Kişiye göre yıllık gider</h2>
+      <div style="margin-bottom:10px;">
+        <div class="bar-label-row"><span style="font-weight:600;">${esc(kisiler.a)}</span><span style="font-family:monospace;">${TL(kisiA)}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${kisiA/maxKisi*100}%;background:#4F6F52;"></div></div>
+      </div>
+      <div>
+        <div class="bar-label-row"><span style="font-weight:600;">${esc(kisiler.b)}</span><span style="font-family:monospace;">${TL(kisiB)}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${kisiB/maxKisi*100}%;background:#5A7D8C;"></div></div>
+      </div>
+    </div>
+  `;
 }
 
 function ayarModaliAc() {
@@ -675,6 +922,7 @@ function ayarModaliAc() {
       <label class="form-label">2. kişi</label>
       <input id="ayar-b" class="input" value="${esc(kisiler.b)}" />
       <p class="bos-metin" style="margin-top:10px;">Hâne kodu: <strong>${esc(haneKodu)}</strong><br/>Bu kodu bilen ve giren herkes bu defteri görür ve düzenler.</p>
+      <button class="kaydet-btn" style="background:#8E7A4A;margin-top:8px;" onclick="haneKoduDegistir()">Farklı hâne koduna geç</button>
       <button class="kaydet-btn" onclick="ayarKaydet()">Kaydet</button>
     </div>
   `;
@@ -685,6 +933,11 @@ function ayarKaydet() {
   const b = document.getElementById("ayar-b").value.trim() || "Eşim";
   kisilerKaydet({ a, b });
   document.getElementById("ayar-overlay").remove();
+}
+function haneKoduDegistir() {
+  if (!confirm("Bu tarayıcıdaki kayıtlı hâne kodunu silip yeniden girmek istediğinize emin misiniz?")) return;
+  localStorage.removeItem("hane-defteri-kodu");
+  location.reload();
 }
 </script>
 </body>
