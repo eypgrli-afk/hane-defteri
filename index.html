@@ -162,6 +162,10 @@ let kisiler = { a: "Ben", b: "Eşim" };
 let ayIndex = new Date().getMonth();
 let yil = new Date().getFullYear();
 let kisiFiltre = "hepsi";
+let kartKisiFiltre = "hepsi";
+let cihazKisi = (() => {
+  try { return localStorage.getItem("hane-defteri-cihaz-kisi") || "a"; } catch (e) { return "a"; }
+})();
 let dagilimTur = "gider";
 let mevcutTur = "gider";
 let raporYili = new Date().getFullYear();
@@ -254,7 +258,8 @@ function kisilerKaydet(yeni) {
 function kartListesi() {
   return Object.entries(kartlar).map(([id, v]) => ({ id, ...v }));
 }
-function kartBolumRender(baslik, liste, tur) {
+function kartBolumRender(baslik, tumListe, tur) {
+  const liste = kartKisiFiltre === "hepsi" ? tumListe : tumListe.filter((k) => k.kisi === kartKisiFiltre);
   const bosMetin = tur === "sabitkredi"
     ? `Henüz kayıtlı bir krediniz yok. Araba kredisi, ihtiyaç kredisi gibi sabit taksitli borçlarınızı eklemek için "+" butonuna basın.`
     : `Henüz kayıtlı bir kredi kartınız yok. Eklemek için "+" butonuna basın.`;
@@ -262,9 +267,16 @@ function kartBolumRender(baslik, liste, tur) {
     <div class="card">
       <div class="card-header-row">
         <h2 class="card-title">${baslik}</h2>
-        <button class="icon-btn" onclick="kartEkleFormAc('${tur}')">${IKON.arti}</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select class="select-mini" onchange="kartKisiFiltreDegis(this.value)">
+            <option value="hepsi" ${kartKisiFiltre==='hepsi'?'selected':''}>Herkes</option>
+            <option value="a" ${kartKisiFiltre==='a'?'selected':''}>${esc(kisiler.a)}</option>
+            <option value="b" ${kartKisiFiltre==='b'?'selected':''}>${esc(kisiler.b)}</option>
+          </select>
+          <button class="icon-btn" onclick="kartEkleFormAc('${tur}')">${IKON.arti}</button>
+        </div>
       </div>
-      ${liste.length === 0 ? `<p class="bos-metin">${bosMetin}</p>` : `
+      ${tumListe.length === 0 ? `<p class="bos-metin">${bosMetin}</p>` : liste.length === 0 ? `<p class="bos-metin">Bu kişiye ait kayıt yok.</p>` : `
         <div class="bar-label-row" style="margin-bottom:10px;">
           <span style="font-weight:700;">Toplam</span>
           <span style="font-family:monospace;font-weight:700;font-size:15px;color:#8B3A3A;">${TL(liste.reduce((s,k)=>s+Number(k.kalanBakiye),0))}</span>
@@ -302,28 +314,49 @@ function kartSil(id) {
   if (!confirm("Bu kartı silmek istediğinize emin misiniz? (Geçmiş ödeme kayıtları işlemler listesinde kalır.)")) return;
   db.ref("haneler/" + haneKodu + "/kartlar/" + id).remove();
 }
-function kartHarcamaEkle(id, tutar) {
+function kartHarcamaEkle(id, tutar, kategori, kisi, tarih, not) {
   const kart = kartlar[id];
   if (!kart) return;
   const yeniBakiye = Number(kart.kalanBakiye) + Number(tutar);
   db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(yeniBakiye);
+  db.ref("haneler/" + haneKodu + "/islemler").push({
+    tur: "gider",
+    kategori, kisi, tutar: Number(tutar), tarih,
+    not: not || (kart.ad + " ile alışveriş"),
+    kartId: id,
+    nakitCikisi: false,
+  });
 }
 function kartEkstreGuncelle(id, yeniBakiye) {
   const kart = kartlar[id];
   if (!kart) return;
+  const fark = Number(yeniBakiye) - Number(kart.kalanBakiye);
   db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(Number(yeniBakiye));
+  if (fark > 0) {
+    db.ref("haneler/" + haneKodu + "/islemler").push({
+      tur: "gider",
+      kategori: "Faiz / Ek Ücret",
+      kisi: kart.kisi, tutar: fark, tarih: new Date().toISOString().slice(0, 10),
+      not: kart.ad + " ekstre farkı (faiz/ücret)",
+      kartId: id,
+      nakitCikisi: false,
+    });
+  }
 }
 function kartOdemeYap(id, tutar, kisi, tarih) {
   const kart = kartlar[id];
   if (!kart) return;
   const yeniBakiye = Math.max(0, Number(kart.kalanBakiye) - Number(tutar));
   db.ref("haneler/" + haneKodu + "/kartlar/" + id + "/kalanBakiye").set(yeniBakiye);
+  // kart/kredi ödemesi: gider sayılmaz (kredi kartı harcaması zaten "+ Harcama" ile,
+  // sabit kredi ise kendi başına bir "harcama" değil, borç servisi), sadece nakit çıkışı olarak işaretlenir
   db.ref("haneler/" + haneKodu + "/islemler").push({
-    tur: "gider",
-    kategori: "Kredi Kartı Ödemesi",
+    tur: "kartodeme",
+    kategori: kart.tur === "sabitkredi" ? "Kredi Taksidi" : "Kredi Kartı Ödemesi",
     kisi, tutar: Number(tutar), tarih,
     not: kart.ad + " ödemesi",
     kartId: id,
+    nakitCikisi: true,
   });
 }
 
@@ -411,6 +444,11 @@ function render() {
 
   const toplamGiderTum = toplamGider + toplamYatirim === 0 && toplamGelir === 0;
 
+  // nakit akışı: gerçek nakit çıkışı (gider olarak sayılan ama henüz ödenmemiş kart harcamaları/faiz hariç)
+  const nakitOdeme = buAy.filter((i) => (i.tur === "gider" && i.nakitCikisi) || i.tur === "kartodeme")
+    .reduce((s, i) => s + Number(i.tutar), 0);
+  const nakitBakiye = toplamGelir - nakitOdeme - toplamYatirim;
+
   // terazi açısı
   const t = toplamGelir + toplamGider;
   const oran = t === 0 ? 0 : (toplamGelir - toplamGider) / t;
@@ -478,6 +516,16 @@ function render() {
       <div class="summary-card"><p class="summary-label">Gider</p><p class="summary-value" style="color:#A85C3B;">${TL(toplamGider)}</p></div>
       <div class="summary-card"><p class="summary-label">Yatırım</p><p class="summary-value" style="color:${YATIRIM_RENGI};">${TL(toplamYatirim)}</p></div>
       <div class="summary-card"><p class="summary-label">Bakiye</p><p class="summary-value" style="color:${bakiye>=0?'#3F6B66':'#8B3A3A'};">${TL(bakiye)}</p></div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Nakit Akışı</h2>
+      <p class="bos-metin" style="margin-bottom:10px;">Bu ay gerçekten cebinizden/hesabınızdan çıkan nakit — kart harcamalarınız ekstre ödenene kadar buraya dahil olmaz.</p>
+      <div class="bar-label-row"><span style="font-weight:600;">Giren nakit (Gelir)</span><span style="font-family:monospace;color:#4F6F52;font-weight:700;">${TL(toplamGelir)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;"><span style="font-weight:600;">Çıkan ödeme</span><span style="font-family:monospace;color:#A85C3B;font-weight:700;">${TL(nakitOdeme)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;"><span style="font-weight:600;">Yatırıma giden</span><span style="font-family:monospace;color:${YATIRIM_RENGI};font-weight:700;">${TL(toplamYatirim)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;border-top:1px solid #EFE7D4;padding-top:8px;"><span style="font-weight:700;">Nakit bakiye</span><span style="font-family:monospace;font-weight:700;color:${nakitBakiye>=0?'#3F6B66':'#8B3A3A'};">${TL(nakitBakiye)}</span></div>
+      <p class="bos-metin" style="margin-top:6px;font-size:11px;">Nakit bakiye = Gelir − Çıkan ödeme − Yatırıma giden</p>
     </div>
 
     <div class="add-row">
@@ -550,6 +598,7 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 
 function dagilimSec(t) { dagilimTur = t; render(); }
 function kisiFiltreDegis(v) { kisiFiltre = v; render(); }
+function kartKisiFiltreDegis(v) { kartKisiFiltre = v; render(); }
 
 /* ---------- işlem ekleme formu ---------- */
 function formAc(tur) {
@@ -582,8 +631,8 @@ function formAc(tur) {
       </select>
       <label class="form-label">Kim</label>
       <div class="toggle-pill">
-        <button id="f-kisi-a" class="pill-btn active" style="background:#8E5B6B;" onclick="kisiSec('a')">${esc(kisiler.a)}</button>
-        <button id="f-kisi-b" class="pill-btn" onclick="kisiSec('b')">${esc(kisiler.b)}</button>
+        <button id="f-kisi-a" class="pill-btn ${cihazKisi!=='b'?'active':''}" style="${cihazKisi!=='b'?'background:#8E5B6B;':''}" onclick="kisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="f-kisi-b" class="pill-btn ${cihazKisi==='b'?'active':''}" style="${cihazKisi==='b'?'background:#8E5B6B;':''}" onclick="kisiSec('b')">${esc(kisiler.b)}</button>
       </div>
       <label class="form-label">Tarih</label>
       <input id="f-tarih" class="input" type="date" value="${bugun}" />
@@ -595,7 +644,7 @@ function formAc(tur) {
   const eski = document.getElementById("form-overlay");
   if (eski) eski.remove();
   document.body.appendChild(overlay);
-  window.__secilenKisi = "a";
+  window.__secilenKisi = cihazKisi;
 }
 
 function kisiSec(k) {
@@ -613,7 +662,7 @@ function formGonder() {
   const tarih = document.getElementById("f-tarih").value;
   const not = document.getElementById("f-not").value.trim();
   const kisi = window.__secilenKisi || "a";
-  islemEkle({ tur: mevcutTur, tutar, kategori, kisi, tarih, not });
+  islemEkle({ tur: mevcutTur, tutar, kategori, kisi, tarih, not, nakitCikisi: true });
   document.getElementById("form-overlay").remove();
 }
 
@@ -675,6 +724,7 @@ function kartEkleGonder() {
 function kartHarcamaFormAc(id) {
   const k = kartlar[id];
   if (!k) return;
+  const bugun = new Date().toISOString().slice(0, 10);
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "kart-harcama-overlay";
@@ -685,20 +735,41 @@ function kartHarcamaFormAc(id) {
         <h3 class="modal-title">${esc(k.ad)} — harcama ekle</h3>
         <button class="icon-btn" onclick="document.getElementById('kart-harcama-overlay').remove()">${IKON.kapat}</button>
       </div>
-      <p class="bos-metin">Şu anki bakiye: <strong>${TL(k.kalanBakiye)}</strong>. Bu kartla yaptığınız harcama bu tutara eklenir, ekstre gelene kadar "Gider" olarak sayılmaz.</p>
+      <p class="bos-metin">Şu anki bakiye: <strong>${TL(k.kalanBakiye)}</strong>. Taksitli alışverişte taksit sayısına bakmadan toplam tutarı girin.</p>
       <label class="form-label">Harcama tutarı (₺)</label>
       <input id="kh-tutar" class="input" type="text" inputmode="decimal" placeholder="0" autofocus />
+      <label class="form-label">Kategori</label>
+      <select id="kh-kategori" class="input">
+        ${GIDER_KATEGORI.map((kat) => `<option value="${esc(kat)}">${esc(kat)}</option>`).join("")}
+      </select>
+      <label class="form-label">Kim harcadı</label>
+      <div class="toggle-pill">
+        <button id="kh-kisi-a" class="pill-btn ${k.kisi!=='b'?'active':''}" style="${k.kisi!=='b'?'background:#8E5B6B;':''}" onclick="kartHarcamaKisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="kh-kisi-b" class="pill-btn ${k.kisi==='b'?'active':''}" style="${k.kisi==='b'?'background:#8E5B6B;':''}" onclick="kartHarcamaKisiSec('b')">${esc(kisiler.b)}</button>
+      </div>
+      <label class="form-label">Tarih</label>
+      <input id="kh-tarih" class="input" type="date" value="${bugun}" />
       <label class="form-label">Not (opsiyonel)</label>
       <input id="kh-not" class="input" type="text" placeholder="örn. ayakkabı, 6 taksit" />
       <button class="kaydet-btn" style="background:#8B3A3A;" onclick="kartHarcamaGonder('${id}')">Kaydet</button>
     </div>
   `;
   document.body.appendChild(overlay);
+  window.__kartHarcamaKisi = k.kisi === "b" ? "b" : "a";
+}
+function kartHarcamaKisiSec(k) {
+  window.__kartHarcamaKisi = k;
+  document.getElementById("kh-kisi-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("kh-kisi-b").style.background = k === "b" ? "#8E5B6B" : "";
 }
 function kartHarcamaGonder(id) {
   const tutar = parseFloat(document.getElementById("kh-tutar").value.replace(",", "."));
   if (!tutar || tutar <= 0) { alert("Lütfen geçerli bir tutar girin."); return; }
-  kartHarcamaEkle(id, tutar);
+  const kategori = document.getElementById("kh-kategori").value;
+  const kisi = window.__kartHarcamaKisi || "a";
+  const tarih = document.getElementById("kh-tarih").value;
+  const not = document.getElementById("kh-not").value.trim();
+  kartHarcamaEkle(id, tutar, kategori, kisi, tarih, not);
   document.getElementById("kart-harcama-overlay").remove();
 }
 
@@ -921,12 +992,26 @@ function ayarModaliAc() {
       <input id="ayar-a" class="input" value="${esc(kisiler.a)}" />
       <label class="form-label">2. kişi</label>
       <input id="ayar-b" class="input" value="${esc(kisiler.b)}" />
+
+      <label class="form-label">Bu cihazda ben...</label>
+      <p class="bos-metin" style="margin-bottom:6px;">Bu telefonda/tarayıcıda işlem eklerken "Kim" seçimi otomatik olarak buna göre gelsin.</p>
+      <div class="toggle-pill">
+        <button id="ayar-cihaz-a" class="pill-btn ${cihazKisi!=='b'?'active':''}" style="${cihazKisi!=='b'?'background:#8E5B6B;':''}" onclick="cihazKisiSec('a')">${esc(kisiler.a)}</button>
+        <button id="ayar-cihaz-b" class="pill-btn ${cihazKisi==='b'?'active':''}" style="${cihazKisi==='b'?'background:#8E5B6B;':''}" onclick="cihazKisiSec('b')">${esc(kisiler.b)}</button>
+      </div>
+
       <p class="bos-metin" style="margin-top:10px;">Hâne kodu: <strong>${esc(haneKodu)}</strong><br/>Bu kodu bilen ve giren herkes bu defteri görür ve düzenler.</p>
       <button class="kaydet-btn" style="background:#8E7A4A;margin-top:8px;" onclick="haneKoduDegistir()">Farklı hâne koduna geç</button>
       <button class="kaydet-btn" onclick="ayarKaydet()">Kaydet</button>
     </div>
   `;
   document.body.appendChild(overlay);
+}
+function cihazKisiSec(k) {
+  cihazKisi = k;
+  try { localStorage.setItem("hane-defteri-cihaz-kisi", k); } catch (e) {}
+  document.getElementById("ayar-cihaz-a").style.background = k === "a" ? "#8E5B6B" : "";
+  document.getElementById("ayar-cihaz-b").style.background = k === "b" ? "#8E5B6B" : "";
 }
 function ayarKaydet() {
   const a = document.getElementById("ayar-a").value.trim() || "Ben";
