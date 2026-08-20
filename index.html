@@ -534,6 +534,9 @@ function render() {
       <button class="add-btn" style="background:${YATIRIM_RENGI};" onclick="formAc('yatirim')">${IKON.arti} Yatırım</button>
     </div>
 
+    ${kartBolumRender("Kredi Kartları", kartListesi().filter((k) => k.tur !== "sabitkredi"), "kredikart")}
+    ${kartBolumRender("Krediler", kartListesi().filter((k) => k.tur === "sabitkredi"), "sabitkredi")}
+
     <div class="card">
       <div class="card-header-row">
         <h2 class="card-title">Harcama dağılımı</h2>
@@ -568,9 +571,6 @@ function render() {
         <div class="bar-track"><div class="bar-fill" style="width:${kisiGideriB/maxKisi*100}%;background:#5A7D8C;"></div></div>
       </div>
     </div>
-
-    ${kartBolumRender("Kredi Kartları", kartListesi().filter((k) => k.tur !== "sabitkredi"), "kredikart")}
-    ${kartBolumRender("Krediler", kartListesi().filter((k) => k.tur === "sabitkredi"), "sabitkredi")}
 
     <div class="card">
       <div class="card-header-row">
@@ -900,6 +900,10 @@ function yillikRaporRender() {
   const gecenGelir = toplam("gelir", gecenYilIslemler);
   const gecenGider = toplam("gider", gecenYilIslemler);
 
+  const yilNakitOdeme = buYilIslemler.filter((i) => (i.tur === "gider" && i.nakitCikisi) || i.tur === "kartodeme")
+    .reduce((s, i) => s + Number(i.tutar), 0);
+  const yilNakitBakiye = buGelir - yilNakitOdeme - buYatirim;
+
   const aylikGelir = aylikDiziler(raporYili, "gelir");
   const aylikGider = aylikDiziler(raporYili, "gider");
 
@@ -938,6 +942,15 @@ function yillikRaporRender() {
         <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4F6F52;margin-right:4px;"></span>Gelir</span>
         <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#A85C3B;margin-right:4px;"></span>Gider</span>
       </div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Yıllık Nakit Akışı</h2>
+      <p class="bos-metin" style="margin-bottom:10px;">Kredi kartı harcamalarınız ekstre ödenene kadar buraya dahil olmaz, sadece gerçek nakit çıkışını gösterir.</p>
+      <div class="bar-label-row"><span style="font-weight:600;">Giren nakit (Gelir)</span><span style="font-family:monospace;color:#4F6F52;font-weight:700;">${TL(buGelir)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;"><span style="font-weight:600;">Çıkan ödeme</span><span style="font-family:monospace;color:#A85C3B;font-weight:700;">${TL(yilNakitOdeme)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;"><span style="font-weight:600;">Yatırıma giden</span><span style="font-family:monospace;color:${YATIRIM_RENGI};font-weight:700;">${TL(buYatirim)}</span></div>
+      <div class="bar-label-row" style="margin-top:6px;border-top:1px solid #EFE7D4;padding-top:8px;"><span style="font-weight:700;">Nakit bakiye</span><span style="font-family:monospace;font-weight:700;color:${yilNakitBakiye>=0?'#3F6B66':'#8B3A3A'};">${TL(yilNakitBakiye)}</span></div>
     </div>
 
     <div class="card">
