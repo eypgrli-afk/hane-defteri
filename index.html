@@ -66,7 +66,7 @@
   .legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .legend-ad { font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .legend-yuzde { font-size: 12px; font-family: monospace; color: #7A6A55; }
+  .legend-yuzde { font-size: 12px; font-family: monospace; color: #7A6A55; white-space: nowrap; flex-shrink: 0; }
 
   .bar-label-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
   .bar-track { height: 8px; background: #EFE7D4; border-radius: 6px; overflow: hidden; }
@@ -561,7 +561,7 @@ function render() {
             <div class="legend-row">
               <span class="legend-dot" style="background:${d.renk};"></span>
               <span class="legend-ad">${esc(d.ad)}</span>
-              <span class="legend-yuzde">%${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
+              <span class="legend-yuzde">${TL(d.deger)} · %${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
             </div>`).join("")}
         </div>
       </div>`}
@@ -977,7 +977,7 @@ function yillikRaporRender() {
             <div class="legend-row">
               <span class="legend-dot" style="background:${d.renk};"></span>
               <span class="legend-ad">${esc(d.ad)}</span>
-              <span class="legend-yuzde">%${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
+              <span class="legend-yuzde">${TL(d.deger)} · %${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
             </div>`).join("")}
         </div>
       </div>`}
