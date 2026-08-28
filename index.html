@@ -462,22 +462,24 @@ function render() {
   const aci = Math.max(-12, Math.min(12, oran * 12));
   const denge = t === 0 ? "Bu ay henüz kayıt yok" : oran > 0.05 ? "Bu ay artıdasınız" : oran < -0.05 ? "Bu ay eksidesiniz" : "Bu ay dengedesiniz";
 
-  // kategori dağılımı
-  const kaynak = buAy.filter((i) => i.tur === dagilimTur);
-  const map = {};
-  kaynak.forEach((i) => { map[i.kategori] = (map[i.kategori] || 0) + Number(i.tutar); });
-  const dagilim = Object.entries(map).map(([ad, deger], idx) => ({ ad, deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] })).sort((a,b) => b.deger - a.deger);
-  const dagilimToplam = dagilimTur === "gider" ? toplamGider : dagilimTur === "yatirim" ? toplamYatirim : toplamGelir;
-
-  // karta göre harcama dağılımı (bu ay, sadece kredi kartı üzerinden oluşan gider — harcama + faiz/ek ücret)
-  const kartMap = {};
-  buAy.filter((i) => i.tur === "gider" && i.kartId).forEach((i) => {
-    kartMap[i.kartId] = (kartMap[i.kartId] || 0) + Number(i.tutar);
-  });
-  const kartDagilim = Object.entries(kartMap)
-    .map(([kartId, deger], idx) => ({ ad: kartlar[kartId] ? kartlar[kartId].ad : "Silinmiş kart", deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] }))
-    .sort((a, b) => b.deger - a.deger);
-  const kartDagilimToplam = kartDagilim.reduce((s, d) => s + d.deger, 0);
+  // harcama dağılımı: kategoriye göre (gider/gelir/yatırım) ya da karta göre
+  let dagilim, dagilimToplam;
+  if (dagilimTur === "kart") {
+    const kartMap = {};
+    buAy.filter((i) => i.tur === "gider" && i.kartId).forEach((i) => {
+      kartMap[i.kartId] = (kartMap[i.kartId] || 0) + Number(i.tutar);
+    });
+    dagilim = Object.entries(kartMap)
+      .map(([kartId, deger], idx) => ({ ad: kartlar[kartId] ? kartlar[kartId].ad : "Silinmiş kart", deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] }))
+      .sort((a, b) => b.deger - a.deger);
+    dagilimToplam = dagilim.reduce((s, d) => s + d.deger, 0);
+  } else {
+    const kaynak = buAy.filter((i) => i.tur === dagilimTur);
+    const map = {};
+    kaynak.forEach((i) => { map[i.kategori] = (map[i.kategori] || 0) + Number(i.tutar); });
+    dagilim = Object.entries(map).map(([ad, deger], idx) => ({ ad, deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] })).sort((a,b) => b.deger - a.deger);
+    dagilimToplam = dagilimTur === "gider" ? toplamGider : dagilimTur === "yatirim" ? toplamYatirim : toplamGelir;
+  }
 
   // kişi bazlı gider
   const kisiGideriA = buAy.filter((i) => i.tur === "gider" && i.kisi === "a").reduce((s,i) => s + Number(i.tutar), 0);
@@ -561,9 +563,10 @@ function render() {
           <button class="pill-btn ${dagilimTur==='gider'?'active':''}" style="${dagilimTur==='gider'?'background:#A85C3B;':''}" onclick="dagilimSec('gider')">Gider</button>
           <button class="pill-btn ${dagilimTur==='gelir'?'active':''}" style="${dagilimTur==='gelir'?'background:#4F6F52;':''}" onclick="dagilimSec('gelir')">Gelir</button>
           <button class="pill-btn ${dagilimTur==='yatirim'?'active':''}" style="${dagilimTur==='yatirim'?'background:'+YATIRIM_RENGI+';':''}" onclick="dagilimSec('yatirim')">Yatırım</button>
+          <button class="pill-btn ${dagilimTur==='kart'?'active':''}" style="${dagilimTur==='kart'?'background:#23342E;':''}" onclick="dagilimSec('kart')">Kart</button>
         </div>
       </div>
-      ${dagilim.length === 0 ? `<p class="bos-metin">Bu ay için henüz ${dagilimTur} kaydı yok.</p>` : `
+      ${dagilim.length === 0 ? `<p class="bos-metin">${dagilimTur==='kart' ? 'Bu ay kredi kartıyla henüz harcama girilmemiş.' : 'Bu ay için henüz ' + dagilimTur + ' kaydı yok.'}</p>` : `
       <div style="display:flex;align-items:center;gap:10px;">
         <div style="flex-shrink:0;">${donutSvg(dagilim, 128)}</div>
         <div style="flex:1;min-width:0;">
@@ -572,23 +575,6 @@ function render() {
               <span class="legend-dot" style="background:${d.renk};"></span>
               <span class="legend-ad">${esc(d.ad)}</span>
               <span class="legend-yuzde">${TL(d.deger)} · %${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
-            </div>`).join("")}
-        </div>
-      </div>`}
-    </div>
-
-    <div class="card">
-      <h2 class="card-title">Karta göre harcama</h2>
-      <p class="bos-metin" style="margin-bottom:10px;">Bu ay kredi kartlarınızla yaptığınız harcamaların karta göre dağılımı (ekstre ödemesi değil, harcama anı).</p>
-      ${kartDagilim.length === 0 ? `<p class="bos-metin">Bu ay kredi kartıyla henüz harcama girilmemiş.</p>` : `
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div style="flex-shrink:0;">${donutSvg(kartDagilim, 128)}</div>
-        <div style="flex:1;min-width:0;">
-          ${kartDagilim.map(d => `
-            <div class="legend-row">
-              <span class="legend-dot" style="background:${d.renk};"></span>
-              <span class="legend-ad">${esc(d.ad)}</span>
-              <span class="legend-yuzde">${TL(d.deger)} · %${kartDagilimToplam ? Math.round(d.deger/kartDagilimToplam*100) : 0}</span>
             </div>`).join("")}
         </div>
       </div>`}
