@@ -469,6 +469,16 @@ function render() {
   const dagilim = Object.entries(map).map(([ad, deger], idx) => ({ ad, deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] })).sort((a,b) => b.deger - a.deger);
   const dagilimToplam = dagilimTur === "gider" ? toplamGider : dagilimTur === "yatirim" ? toplamYatirim : toplamGelir;
 
+  // karta göre harcama dağılımı (bu ay, sadece kredi kartı üzerinden oluşan gider — harcama + faiz/ek ücret)
+  const kartMap = {};
+  buAy.filter((i) => i.tur === "gider" && i.kartId).forEach((i) => {
+    kartMap[i.kartId] = (kartMap[i.kartId] || 0) + Number(i.tutar);
+  });
+  const kartDagilim = Object.entries(kartMap)
+    .map(([kartId, deger], idx) => ({ ad: kartlar[kartId] ? kartlar[kartId].ad : "Silinmiş kart", deger, renk: KATEGORI_RENK[idx % KATEGORI_RENK.length] }))
+    .sort((a, b) => b.deger - a.deger);
+  const kartDagilimToplam = kartDagilim.reduce((s, d) => s + d.deger, 0);
+
   // kişi bazlı gider
   const kisiGideriA = buAy.filter((i) => i.tur === "gider" && i.kisi === "a").reduce((s,i) => s + Number(i.tutar), 0);
   const kisiGideriB = buAy.filter((i) => i.tur === "gider" && i.kisi === "b").reduce((s,i) => s + Number(i.tutar), 0);
@@ -562,6 +572,23 @@ function render() {
               <span class="legend-dot" style="background:${d.renk};"></span>
               <span class="legend-ad">${esc(d.ad)}</span>
               <span class="legend-yuzde">${TL(d.deger)} · %${dagilimToplam ? Math.round(d.deger/dagilimToplam*100) : 0}</span>
+            </div>`).join("")}
+        </div>
+      </div>`}
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Karta göre harcama</h2>
+      <p class="bos-metin" style="margin-bottom:10px;">Bu ay kredi kartlarınızla yaptığınız harcamaların karta göre dağılımı (ekstre ödemesi değil, harcama anı).</p>
+      ${kartDagilim.length === 0 ? `<p class="bos-metin">Bu ay kredi kartıyla henüz harcama girilmemiş.</p>` : `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex-shrink:0;">${donutSvg(kartDagilim, 128)}</div>
+        <div style="flex:1;min-width:0;">
+          ${kartDagilim.map(d => `
+            <div class="legend-row">
+              <span class="legend-dot" style="background:${d.renk};"></span>
+              <span class="legend-ad">${esc(d.ad)}</span>
+              <span class="legend-yuzde">${TL(d.deger)} · %${kartDagilimToplam ? Math.round(d.deger/kartDagilimToplam*100) : 0}</span>
             </div>`).join("")}
         </div>
       </div>`}
